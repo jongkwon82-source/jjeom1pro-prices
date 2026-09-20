@@ -1,0 +1,52 @@
+name: 시세 수집
+
+on:
+  schedule:
+    # 한국장 마감 후 — 평일 18:10 KST = 09:10 UTC
+    - cron: '10 9 * * 1-5'
+    # 미국장 마감 후 — 평일 07:10 KST = 전날 22:10 UTC
+    - cron: '10 22 * * 0-4'
+  workflow_dispatch:          # 버튼으로 수동 실행
+    inputs:
+      since:
+        description: '조회 시작일 (YYYYMMDD, 비우면 최근 25일)'
+        required: false
+
+permissions:
+  contents: write             # 결과 CSV 를 커밋하기 위해 필요
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest    # KIS 가 해외 IP 를 막으면 self-hosted 로 바꾸세요
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install --quiet requests
+
+      - name: 시세 받기
+        env:
+          KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
+          KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
+          KIS_MODE: ${{ vars.KIS_MODE || 'real' }}
+        run: python fetch_prices.py ${{ inputs.since }}
+
+      - name: 바뀐 게 있으면 커밋
+        run: |
+          git config user.name  "prices-bot"
+          git config user.email "prices-bot@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "바뀐 내용 없음 — 커밋 생략"
+          else
+            git commit -m "시세 갱신 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
