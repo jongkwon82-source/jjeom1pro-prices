@@ -66,7 +66,7 @@ def kr_daily(code, start, end):
         if not out: break
         for o in out: rows[o['stck_bsop_date']] = float(o['stck_clpr'])
         oldest = min(o['stck_bsop_date'] for o in out)
-        if oldest > s: break
+        if oldest <= start: break
         cur = (datetime.datetime.strptime(oldest, '%Y%m%d')
                - datetime.timedelta(days=1)).strftime('%Y%m%d')
         time.sleep(0.12)
