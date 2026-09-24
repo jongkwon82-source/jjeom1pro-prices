@@ -2,25 +2,26 @@ name: 장중 시세 수집
 
 on:
   schedule:
-    # 평일 09:00~19:50 KST 10분마다 (= 00:00~10:50 UTC)
+    # 한국장 — 평일 09:00~19:50 KST 10분마다 (= 00:00~10:50 UTC), 20:05·20:20 마감 기록
     - cron: '*/10 0-10 * * 1-5'
-    # 20:05 · 20:20 KST — 그날 마감 값 기록 (두 번째는 늦게 출발할 때 대비, 중복 기록은 안 함)
     - cron: '5,20 11 * * 1-5'
-    # 휴장일은 스크립트가 스스로 알아보고 아무것도 쓰지 않습니다.
+    # 미국장 — 13:00~21:50 UTC 10분마다 (= 한국시간 22:00~06:50, 서머타임·겨울 모두 포함)
+    - cron: '*/10 13-21 * * 1-5'
+    # 시장별 개장 시간·휴장일은 스크립트가 스스로 판단합니다. 시간 밖이면 몇 초 만에 끝납니다.
     # 깃허브 예약 실행은 5~20분 늦게 출발할 수 있습니다.
   workflow_dispatch:          # 버튼으로 수동 실행
 
 permissions:
-  contents: write             # intraday_KR.json 을 커밋하기 위해 필요
+  contents: write             # data/intraday*.json 을 커밋하기 위해 필요
 
 concurrency:
-  group: prices               # 일봉 수집(prices.yml)과 동시에 push 하지 않도록 같은 그룹
+  group: intraday             # 일봉 수집(prices)과 다른 그룹 — 서로 대기열을 취소하지 않도록
   cancel-in-progress: false
 
 jobs:
   intraday:
     runs-on: ubuntu-latest    # KIS 가 해외 IP 를 막으면 self-hosted 로 바꾸세요
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -41,11 +42,13 @@ jobs:
         run: |
           git config user.name  "prices-bot"
           git config user.email "prices-bot@users.noreply.github.com"
-          git add data/intraday_KR.json
+          git add -A data/
           if git diff --staged --quiet; then
             echo "바뀐 내용 없음 — 커밋 생략"
           else
             git commit -m "장중 시세 $(TZ=Asia/Seoul date +'%Y-%m-%d %H:%M KST')"
-            git pull --rebase --quiet
-            git push
+            for i in 1 2 3; do
+              git pull --rebase --quiet && git push && break
+              echo "push 재시도 $i"; sleep 5
+            done
           fi
