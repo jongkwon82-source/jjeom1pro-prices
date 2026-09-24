@@ -48,5 +48,8 @@ jobs:
             echo "바뀐 내용 없음 — 커밋 생략"
           else
             git commit -m "시세 갱신 $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase --quiet && git push && break
+              echo "push 재시도 $i"; sleep 5
+            done
           fi
