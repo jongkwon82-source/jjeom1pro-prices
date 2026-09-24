@@ -1,0 +1,48 @@
+name: 장중 시세 수집
+
+on:
+  schedule:
+    # 평일 장중 15분마다 — 09:00~15:45 KST = 00:00~06:45 UTC
+    # (깃허브 예약 실행은 5~20분 늦게 출발할 수 있습니다)
+    - cron: '*/15 0-6 * * 1-5'
+  workflow_dispatch:          # 버튼으로 수동 실행
+
+permissions:
+  contents: write             # intraday_KR.json 을 커밋하기 위해 필요
+
+concurrency:
+  group: prices               # 일봉 수집(prices.yml)과 동시에 push 하지 않도록 같은 그룹
+  cancel-in-progress: false
+
+jobs:
+  intraday:
+    runs-on: ubuntu-latest    # KIS 가 해외 IP 를 막으면 self-hosted 로 바꾸세요
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install --quiet requests
+
+      - name: 현재가 받기
+        env:
+          KIS_APPKEY: ${{ secrets.KIS_APPKEY }}
+          KIS_APPSECRET: ${{ secrets.KIS_APPSECRET }}
+          KIS_MODE: ${{ vars.KIS_MODE || 'real' }}
+        run: python fetch_intraday.py
+
+      - name: 바뀐 게 있으면 커밋
+        run: |
+          git config user.name  "prices-bot"
+          git config user.email "prices-bot@users.noreply.github.com"
+          git add data/intraday_KR.json
+          if git diff --staged --quiet; then
+            echo "바뀐 내용 없음 — 커밋 생략"
+          else
+            git commit -m "장중 시세 $(TZ=Asia/Seoul date +'%Y-%m-%d %H:%M KST')"
+            git pull --rebase --quiet
+            git push
+          fi
