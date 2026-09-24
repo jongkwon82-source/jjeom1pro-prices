@@ -47,12 +47,21 @@ def now_kst():
 
 
 def token():
-    r = requests.post(HOST + '/oauth2/tokenP',
-                      json={'grant_type': 'client_credentials',
-                            'appkey': APPKEY, 'appsecret': SECRET}, timeout=20)
-    if r.status_code != 200:
-        print('토큰 발급 실패', r.status_code, r.text[:300]); sys.exit(1)
-    return r.json()['access_token']
+    """토큰 발급. KIS 는 1분에 한 번만 내주므로(EGW00133) 걸리면 65초 기다렸다 다시 받는다."""
+    for i in range(3):
+        try:
+            r = requests.post(HOST + '/oauth2/tokenP',
+                              json={'grant_type': 'client_credentials',
+                                    'appkey': APPKEY, 'appsecret': SECRET}, timeout=20)
+            if r.status_code == 200 and r.json().get('access_token'):
+                return r.json()['access_token']
+            print('토큰 발급 실패 (%d/3)' % (i + 1), r.status_code, r.text[:300])
+        except Exception as e:
+            print('토큰 발급 예외 (%d/3)' % (i + 1), e)
+        if i < 2:
+            print('   65초 기다렸다 다시 시도합니다')
+            time.sleep(65)
+    sys.exit(1)
 
 
 TOK = None
@@ -88,8 +97,19 @@ def num(x):
         return None
 
 
-def last_trade_date(code='069500'):
-    """국내 일자별시세 FHKST01010400 — 가장 최근 거래일(YYYYMMDD). 개장일 장중에는 오늘 날짜가 나온다."""
+def last_trade_date(today, code='005930'):
+    """가장 최근 거래일(YYYYMMDD). 개장일 장중에는 오늘 날짜가 나온다.
+    ① 기간별시세 FHKST03010100 — fetch_prices.py 가 매일 쓰는, 이 계정에서 검증된 API
+    ② 안 되면 일자별시세 FHKST01010400"""
+    start = (datetime.datetime.strptime(today, '%Y%m%d') - datetime.timedelta(days=20)).strftime('%Y%m%d')
+    j = get('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice', 'FHKST03010100',
+            {'FID_COND_MRKT_DIV_CODE': 'J', 'FID_INPUT_ISCD': code,
+             'FID_INPUT_DATE_1': start, 'FID_INPUT_DATE_2': today,
+             'FID_PERIOD_DIV_CODE': 'D', 'FID_ORG_ADJ_PRC': '0'})
+    ds = [o.get('stck_bsop_date') for o in ((j or {}).get('output2') or []) if o.get('stck_bsop_date')]
+    if ds:
+        return max(ds)
+    print('   기간별시세로 거래일 확인 실패 — 일자별시세로 다시 시도')
     j = get('/uapi/domestic-stock/v1/quotations/inquire-daily-price', 'FHKST01010400',
             {'FID_COND_MRKT_DIV_CODE': 'J', 'FID_INPUT_ISCD': code,
              'FID_PERIOD_DIV_CODE': 'D', 'FID_ORG_ADJ_PRC': '0'})
@@ -146,7 +166,7 @@ def main():
         print('개장 전(%s) — 건너뜀' % now.strftime('%H:%M')); return
 
     TOK = token(); print('토큰 발급 OK')
-    td = last_trade_date()
+    td = last_trade_date(today)
     print('최근 거래일', td)
     if td is None:
         print('거래일 확인 실패 — 이번 회차는 건너뜀'); sys.exit(1)
